@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Career Paths Mind Map (Metro Map Layout)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Tailwind for quick style -->
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        body { background: #f8f9fa; }
+        .node-group { cursor: pointer; }
+        .metro-link { stroke: #ccc; stroke-width: 2px; }
+        .job-function { fill: #062C3A; }
+        .job-family { fill: #ABC100; }
+        .job-title { fill: #00A4A6; }
+        .node-label { font-size: 15px; dominant-baseline: middle; }
+        .legend-dot { display: inline-block; width: 14px; height: 14px; border-radius: 50%; margin-right: 8px; vertical-align: middle; }
+    </style>
+</head>
+<body>
+    <div class="py-4 px-8 bg-blue-900 text-white text-center text-2xl font-bold shadow">Career Path Metro Map</div>
+    <div class="flex px-8 pt-6">
+        <div>
+            <svg id="metro-map" width="1800" height="1000"></svg>
+            <div id="loader" class="text-center text-gray-700 pt-6">Loading data...</div>
+        </div>
+        <div class="pl-12 pt-8">
+            <div class="mb-6">
+                <div class="mb-2 text-lg font-bold">Legend</div>
+                <div><span class="legend-dot" style="background:#062C3A"></span>Job Function</div>
+                <div><span class="legend-dot" style="background:#ABC100"></span>Job Family</div>
+                <div><span class="legend-dot" style="background:#00A4A6"></span>Job Title</div>
+            </div>
+            <div class="mb-6 text-sm text-gray-700">
+                <b>Instructions:</b>
+                <ul class="list-disc ml-6 mt-1">
+                    <li>Click a Job Function to show its Job Families.</li>
+                    <li>Click a Job Family to show its Job Titles.</li>
+                    <li>Click again to collapse.</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script>
+    // Helper to measure text width (for correct offsets)
+    function measureTextWidth(text, font = "15px Segoe UI") {
+        let ctx = measureTextWidth.ctx || (measureTextWidth.ctx = document.createElement("canvas").getContext("2d"));
+        ctx.font = font;
+        return ctx.measureText(text).width;
+    }
+
+    // Data structure build from flat JSON
+    function buildHierarchy(data) {
+        const root = { name: "Career Paths", children: [], type: "root" };
+        // Group by Job Function
+        const funcMap = {};
+        data.forEach(d => {
+            let fn = d["Job Function"]?.trim();
+            let fam = d["Job Family"]?.trim();
+            let title = d["Job Title"]?.trim();
+            if (!fn || !fam || !title) return;
+            if (!funcMap[fn]) {
+                funcMap[fn] = { name: fn, type: "function", children: [], _expanded: false };
+            }
+            let famNode = funcMap[fn].children.find(f => f.name === fam);
+            if (!famNode) {
+                famNode = { name: fam, type: "family", children: [], _expanded: false };
+                funcMap[fn].children.push(famNode);
+            }
+            famNode.children.push({
+                name: title,
+                grade: d["Grade"],
+                successor: d["successor"],
+                type: "title"
+            });
+        });
+        root.children = Object.values(funcMap);
+        return root;
+    }
+
+    // Draw Metro Map Layout
+    function drawMetroMap(rootData) {
+        const svg = d3.select("#metro-map");
+        svg.selectAll("*").remove();
+        const paddingY = 30, paddingX = 30, nodeGapX = 24, nodeGapY = 40;
+        let curY = paddingY;
+
+        // Flat list to keep expanded/collapsed states
+        function render() {
+            svg.selectAll("*").remove();
+            let y = paddingY;
+
+            rootData.children.forEach((fn, i) => {
+                let x = paddingX;
+                let fnW = measureTextWidth(fn.name) + 38;
+                // Job Function node
+                drawNode(svg, x, y, fn.name, "function", () => {
+                    fn._expanded = !fn._expanded;
+                    render();
+                });
+                svg.append("text")
+                   .attr("x", x+24)
+                   .attr("y", y+4)
+                   .text(fn.name)
+                   .attr("class", "node-label text-white")
+                   .style("font-weight", 700);
+
+                // Draw Job Families if expanded
+                if (fn._expanded) {
+                    let fx = x + fnW + nodeGapX;
+                    let fy = y;
+                    fn.children.forEach((fam, j) => {
+                        let famW = measureTextWidth(fam.name) + 34;
+                        drawNode(svg, fx, fy, fam.name, "family", () => {
+                            fam._expanded = !fam._expanded;
+                            render();
+                        });
+                        svg.append("text")
+                           .attr("x", fx+22)
+                           .attr("y", fy+4)
+                           .text(fam.name)
+                           .attr("class", "node-label text-black")
+                           .style("font-weight", 600);
+
+                        // Draw link from function to family
+                        svg.append("line")
+                            .attr("x1", x+24+measureTextWidth(fn.name))
+                            .attr("y1", y)
+                            .attr("x2", fx)
+                            .attr("y2", fy)
+                            .attr("class", "metro-link");
+
+                        // Draw Job Titles if expanded
+                        if (fam._expanded) {
+                            let tx = fx + famW + nodeGapX;
+                            fam.children.forEach((title, k) => {
+                                let ty = fy + k * nodeGapY;
+                                drawNode(svg, tx, ty, title.name, "title", null, title.grade, title.successor);
+                                svg.append("text")
+                                   .attr("x", tx+16)
+                                   .attr("y", ty+4)
+                                   .text(title.name)
+                                   .attr("class", "node-label text-black");
+
+                                // Link from family to job title
+                                svg.append("line")
+                                    .attr("x1", fx+22+measureTextWidth(fam.name))
+                                    .attr("y1", fy)
+                                    .attr("x2", tx)
+                                    .attr("y2", ty)
+                                    .attr("class", "metro-link");
+                            });
+                        }
+                        fy += (fam._expanded ? Math.max(fam.children.length * nodeGapY, nodeGapY) : nodeGapY);
+                    });
+                    y += Math.max(fn.children.reduce((acc, fam) => acc + (fam._expanded ? Math.max(fam.children.length * nodeGapY, nodeGapY) : nodeGapY), 0), nodeGapY);
+                } else {
+                    y += nodeGapY;
+                }
+            });
+        }
+
+        function drawNode(svg, x, y, label, type, onClick, grade, successor) {
+            let color = "#ccc", r=16, stroke="none";
+            if (type === "function") color = "#062C3A";
+            if (type === "family") color = "#ABC100";
+            if (type === "title") color = "#00A4A6";
+            let node = svg.append("g")
+                .attr("class", "node-group")
+                .attr("transform", `translate(${x},${y})`)
+                .style("cursor", onClick ? "pointer" : "default");
+            node.append("circle")
+                .attr("r", r)
+                .attr("fill", color)
+                .attr("stroke", stroke);
+            if (onClick) node.on("click", onClick);
+            if (type === "title") {
+                let tip = `Grade: ${grade || "-"}${successor ? " | Successor: " + successor : ""}`;
+                node.append("title").text(tip);
+            }
+        }
+
+        render();
+        document.getElementById("loader").style.display = "none";
+    }
+
+    // Load JSON data and start
+    fetch('Jobsjson.json')
+        .then(r => r.json())
+        .then(data => {
+            const root = buildHierarchy(data);
+            drawMetroMap(root);
+        })
+        .catch(err => {
+            document.getElementById("loader").innerText = "Failed to load JSON: " + err;
+        });
+    </script>
+</body>
+</html>
